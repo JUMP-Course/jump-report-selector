@@ -1,0 +1,15 @@
+[Unit]
+Description=JUMP Report Selector FastAPI backend
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/jump-report-selector/backend
+EnvironmentFile=/etc/jump-report-selector.env
+Environment=UV_CACHE_DIR=/opt/jump-report-selector-cache/uv
+ExecStart=/usr/local/bin/uv run --no-sync uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

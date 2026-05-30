@@ -1,0 +1,200 @@
+from __future__ import annotations
+
+import random
+import uuid
+from collections import defaultdict
+from datetime import date
+from typing import Any, Optional
+
+from fastapi import HTTPException
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from app import models
+
+
+def _base_weight(report_count: int) -> float:
+    if report_count == 0:
+        return 10.0
+    if report_count == 1:
+        return 2.0
+    return 0.5
+
+
+def _reason(report_count: int, question_count: int, last_report: bool) -> str:
+    parts: list[str] = []
+    if report_count == 0:
+        parts.append("尚未汇报，基础权重较高")
+    elif report_count == 1:
+        parts.append("已有效汇报1次，基础权重降低")
+    else:
+        parts.append(f"已有效汇报{report_count}次，基础权重较低")
+
+    if question_count > 0:
+        parts.append(f"有效提问{question_count}次，权重适当降低")
+    else:
+        parts.append("尚未有效提问")
+
+    if last_report:
+        parts.append("上一节课刚汇报，冷却降低权重")
+
+    return "；".join(parts)
+
+
+def compute_student_stats(db: Session, target_lesson: Optional[int] = None) -> list[dict[str, Any]]:
+    """Return explainable draw statistics for every student."""
+    students = db.scalars(select(models.Student).order_by(models.Student.pinyin)).all()
+    valid_reports = db.scalars(select(models.Report).where(models.Report.valid.is_(True))).all()
+    valid_questions = db.scalars(select(models.Question).where(models.Question.valid.is_(True))).all()
+
+    report_count_by_student: dict[int, int] = defaultdict(int)
+    question_count_by_student: dict[int, int] = defaultdict(int)
+    latest_valid_report_lesson = 0
+    report_lessons_by_student: dict[int, set[int]] = defaultdict(set)
+
+    for report in valid_reports:
+        report_count_by_student[report.student_id] += 1
+        report_lessons_by_student[report.student_id].add(report.lesson)
+        latest_valid_report_lesson = max(latest_valid_report_lesson, report.lesson)
+
+    for question in valid_questions:
+        question_count_by_student[question.questioner_id] += 1
+
+    cooldown_reference_lesson = target_lesson - 1 if target_lesson is not None else latest_valid_report_lesson
+    stats: list[dict[str, Any]] = []
+
+    for student in students:
+        report_count = report_count_by_student[student.id]
+        question_count = question_count_by_student[student.id]
+        base_weight = _base_weight(report_count)
+        question_factor = max(0.4, 1 - 0.08 * question_count)
+        last_report = cooldown_reference_lesson > 0 and cooldown_reference_lesson in report_lessons_by_student[student.id]
+        cooldown_factor = 0.2 if last_report else 1.0
+        weight = max(base_weight * question_factor * cooldown_factor, 0.01)
+
+        stats.append(
+            {
+                "id": student.id,
+                "name": student.name,
+                "pinyin": student.pinyin,
+                "active": student.active,
+                "note": student.note,
+                "created_at": student.created_at,
+                "updated_at": student.updated_at,
+                "report_count": report_count,
+                "question_count": question_count,
+                "last_report": last_report,
+                "base_weight": round(base_weight, 4),
+                "question_factor": round(question_factor, 4),
+                "cooldown_factor": round(cooldown_factor, 4),
+                "weight": round(weight, 4),
+                "reason": _reason(report_count, question_count, last_report),
+            }
+        )
+
+    return stats
+
+
+def _weighted_pick(candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    total_weight = sum(item["weight"] for item in candidates)
+    if total_weight <= 0:
+        return random.choice(candidates)
+    threshold = random.uniform(0, total_weight)
+    running = 0.0
+    for candidate in candidates:
+        running += candidate["weight"]
+        if running >= threshold:
+            return candidate
+    return candidates[-1]
+
+
+def build_draw_warnings(db: Session, lesson: int, available_count: int, target_count: int) -> list[str]:
+    warnings: list[str] = []
+    unreported_count = db.scalar(
+        select(func.count(models.Student.id))
+        .where(models.Student.active.is_(True))
+        .where(
+            ~models.Student.id.in_(
+                select(models.Report.student_id).where(models.Report.valid.is_(True)).distinct()
+            )
+        )
+    )
+    unreported_count = int(unreported_count or 0)
+
+    if available_count < target_count:
+        warnings.append(f"可抽取学生只有 {available_count} 人，少于目标人数 {target_count} 人，已抽取全部可用学生")
+    if lesson >= 10 and unreported_count > 0:
+        warnings.append(f"当前仍有 {unreported_count} 名学生尚未有效汇报")
+    if lesson >= 11 and unreported_count > 0:
+        warnings.append("建议优先抽取尚未汇报学生")
+    return warnings
+
+
+def weighted_draw(
+    db: Session,
+    lesson: int,
+    date: date,
+    count: int,
+    excluded_student_ids: Optional[list[int]] = None,
+) -> dict[str, Any]:
+    del date
+    excluded = set(excluded_student_ids or [])
+    target_count = count
+    stats = compute_student_stats(db, target_lesson=lesson)
+    candidates = [item for item in stats if item["active"] and item["id"] not in excluded]
+
+    selected: list[dict[str, Any]] = []
+    remaining = candidates.copy()
+    for index in range(min(target_count, len(remaining))):
+        picked = _weighted_pick(remaining)
+        remaining = [item for item in remaining if item["id"] != picked["id"]]
+        selected.append(
+            {
+                "order": index + 1,
+                "student_id": picked["id"],
+                "name": picked["name"],
+                "pinyin": picked["pinyin"],
+                "report_count": picked["report_count"],
+                "question_count": picked["question_count"],
+                "last_report": picked["last_report"],
+                "weight": picked["weight"],
+                "reason": picked["reason"],
+            }
+        )
+
+    return {
+        "batch_id": str(uuid.uuid4()),
+        "results": selected,
+        "warnings": build_draw_warnings(db, lesson, len(candidates), target_count),
+    }
+
+
+def save_draw_results(
+    db: Session,
+    batch_id: str,
+    lesson: int,
+    date: date,
+    results: list[dict[str, Any] | Any],
+) -> dict[str, Any]:
+    existing = db.scalar(select(models.DrawHistory.id).where(models.DrawHistory.draw_batch_id == batch_id).limit(1))
+    if existing is not None:
+        raise HTTPException(status_code=400, detail="该批次抽取结果已经保存，请勿重复保存")
+
+    rows: list[models.DrawHistory] = []
+    for result in results:
+        payload = result if isinstance(result, dict) else result.model_dump()
+        row = models.DrawHistory(
+            lesson=lesson,
+            date=date,
+            student_id=payload["student_id"],
+            draw_type="draw",
+            action_status="pending",
+            weight=payload["weight"],
+            reason=payload["reason"],
+            draw_batch_id=batch_id,
+        )
+        rows.append(row)
+        db.add(row)
+
+    db.commit()
+    return {"message": "抽取结果已保存", "saved_count": len(rows)}
