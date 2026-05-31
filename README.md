@@ -75,6 +75,8 @@ sudo apt install -y nginx git curl nodejs npm
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
+> 这样安装的各种软件可能版本会比较旧，建议检查版本是否合适，否则使用其他安装方式。
+
 如果 `uv` 安装在 `~/.local/bin/uv`，建议建一个系统路径软链接：
 
 ```bash
@@ -120,7 +122,7 @@ sudo chown -R $USER:$USER /opt/jump-report-selector-data /opt/jump-report-select
 创建 `/etc/jump-report-selector.env`：
 
 ```bash
-sudo nano /etc/jump-report-selector.env
+sudo vim /etc/jump-report-selector.env
 ```
 
 内容示例：
@@ -208,7 +210,7 @@ sudo cp /opt/jump-report-selector/deploy/nginx.no-docker.conf /etc/nginx/conf.d/
 编辑域名或服务器 IP：
 
 ```bash
-sudo nano /etc/nginx/conf.d/jump-report-selector.conf
+sudo vim /etc/nginx/conf.d/jump-report-selector.conf
 ```
 
 把：
