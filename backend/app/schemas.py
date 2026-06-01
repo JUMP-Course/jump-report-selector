@@ -78,6 +78,8 @@ class StudentStats(StudentRead):
     report_count: int
     question_count: int
     last_report: bool
+    recently_drawn: bool
+    eligible_for_next_draw: bool
     base_weight: float
     question_factor: float
     cooldown_factor: float

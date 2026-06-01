@@ -25,6 +25,8 @@ export interface StudentStats extends Student {
   report_count: number;
   question_count: number;
   last_report: boolean;
+  recently_drawn: boolean;
+  eligible_for_next_draw: boolean;
   base_weight: number;
   question_factor: number;
   cooldown_factor: number;

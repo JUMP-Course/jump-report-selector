@@ -125,11 +125,21 @@ export default function QuestionsPage() {
 
   const deleteRecord = async (record: QuestionRecord) => {
     try {
-      await api.delete(`/questions/${record.id}`);
-      messageApi.success("提问记录已删除");
+      const result = await api.delete<{ message: string }>(`/questions/${record.id}`);
+      messageApi.success(result.message);
       void loadData();
     } catch (error) {
       messageApi.error(error instanceof Error ? error.message : "删除提问记录失败");
+    }
+  };
+
+  const clearRecords = async () => {
+    try {
+      const result = await api.delete<{ message: string }>("/questions");
+      messageApi.success(result.message);
+      void loadData();
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : "清空提问记录失败");
     }
   };
 
@@ -163,9 +173,16 @@ export default function QuestionsPage() {
         <Typography.Title level={2} className="page-title">
           提问记录
         </Typography.Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          新增提问
-        </Button>
+        <Space>
+          <Popconfirm title="确认清空全部提问记录？对应抽取历史会重置为未处理。" onConfirm={clearRecords}>
+            <Button danger icon={<DeleteOutlined />} disabled={records.length === 0}>
+              清空全部
+            </Button>
+          </Popconfirm>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            新增提问
+          </Button>
+        </Space>
       </div>
       <div className="toolbar">
         <InputNumber placeholder="课次" min={1} value={lessonFilter ?? undefined} onChange={(value) => setLessonFilter(value ?? null)} />

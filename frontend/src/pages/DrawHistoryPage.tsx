@@ -1,5 +1,5 @@
-import { EditOutlined, ReloadOutlined } from "@ant-design/icons";
-import { Button, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography, message } from "antd";
+import { DeleteOutlined, EditOutlined, ReloadOutlined } from "@ant-design/icons";
+import { Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
@@ -95,6 +95,26 @@ export default function DrawHistoryPage() {
     }
   };
 
+  const deleteRecord = async (record: DrawHistoryRecord) => {
+    try {
+      const result = await api.delete<{ message: string }>(`/draws/history/${record.id}`);
+      messageApi.success(result.message);
+      void loadData();
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : "删除抽取历史失败");
+    }
+  };
+
+  const clearRecords = async () => {
+    try {
+      const result = await api.delete<{ message: string }>("/draws/history");
+      messageApi.success(result.message);
+      void loadData();
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : "清空抽取历史失败");
+    }
+  };
+
   const filtered = useMemo(
     () =>
       records.filter(
@@ -124,11 +144,16 @@ export default function DrawHistoryPage() {
     { title: "批次 ID", dataIndex: "draw_batch_id" },
     {
       title: "操作",
-      width: 120,
+      width: 190,
       render: (_, record) => (
-        <Button icon={<EditOutlined />} size="small" onClick={() => openAction(record)}>
-          设置用途
-        </Button>
+        <Space>
+          <Button icon={<EditOutlined />} size="small" onClick={() => openAction(record)}>
+            设置用途
+          </Button>
+          <Popconfirm title="确认删除该抽取历史？" onConfirm={() => deleteRecord(record)}>
+            <Button danger icon={<DeleteOutlined />} size="small" />
+          </Popconfirm>
+        </Space>
       )
     }
   ];
@@ -140,6 +165,11 @@ export default function DrawHistoryPage() {
         <Typography.Title level={2} className="page-title">
           抽取历史
         </Typography.Title>
+        <Popconfirm title="确认清空全部抽取历史？关联的自动汇报/提问记录也会被删除。" onConfirm={clearRecords}>
+          <Button danger icon={<DeleteOutlined />} disabled={records.length === 0}>
+            清空全部
+          </Button>
+        </Popconfirm>
       </div>
       <div className="toolbar">
         <InputNumber placeholder="课次" min={1} value={lessonFilter ?? undefined} onChange={(value) => setLessonFilter(value ?? null)} />

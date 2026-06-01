@@ -11,6 +11,7 @@ from app.auth import require_auth
 from app.database import get_db
 from app.draw_logic import save_draw_results, weighted_draw
 from app.crud import get_student_or_404
+from app.history_cleanup import clear_draw_history, delete_draw_history_row
 from app.schemas import (
     DrawActionUpdate,
     DrawHistoryRead,
@@ -175,3 +176,28 @@ def update_draw_action(
     db.commit()
     row = _get_history_or_404(db, history_id)
     return serialize_draw_history(row)
+
+
+@router.delete("/history/{history_id}")
+def delete_draw_history(history_id: int, db: Session = Depends(get_db)) -> dict[str, int | str]:
+    row = _get_history_or_404(db, history_id)
+    counts = delete_draw_history_row(db, row)
+    db.commit()
+    return {
+        "message": "抽取历史已删除，关联的自动汇报/提问记录已同步清理",
+        "deleted_histories": counts["histories"],
+        "deleted_reports": counts["reports"],
+        "deleted_questions": counts["questions"],
+    }
+
+
+@router.delete("/history")
+def clear_all_draw_history(db: Session = Depends(get_db)) -> dict[str, int | str]:
+    counts = clear_draw_history(db)
+    db.commit()
+    return {
+        "message": "抽取历史已清空，关联的自动汇报/提问记录已同步清理",
+        "deleted_histories": counts["histories"],
+        "deleted_reports": counts["reports"],
+        "deleted_questions": counts["questions"],
+    }

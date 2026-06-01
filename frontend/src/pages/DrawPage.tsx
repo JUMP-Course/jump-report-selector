@@ -22,6 +22,7 @@ export default function DrawPage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [lastPreviewStudentIds, setLastPreviewStudentIds] = useState<number[]>([]);
   const [form] = Form.useForm<DrawFormValues>();
   const [messageApi, contextHolder] = message.useMessage();
 
@@ -39,14 +40,17 @@ export default function DrawPage() {
 
   const generate = async () => {
     const values = await form.validateFields();
+    const excludedStudentIds = Array.from(new Set([...(values.excluded_student_ids ?? []), ...lastPreviewStudentIds]));
     const payload = {
       ...values,
       date: values.date.format("YYYY-MM-DD"),
-      excluded_student_ids: values.excluded_student_ids ?? []
+      excluded_student_ids: excludedStudentIds
     };
     setLoading(true);
     try {
-      setPreview(await api.post<DrawPreviewResponse>("/draws/preview", payload));
+      const nextPreview = await api.post<DrawPreviewResponse>("/draws/preview", payload);
+      setPreview(nextPreview);
+      setLastPreviewStudentIds(nextPreview.results.map((result) => result.student_id));
       setSaved(false);
       messageApi.success("抽取结果已生成");
     } catch (error) {

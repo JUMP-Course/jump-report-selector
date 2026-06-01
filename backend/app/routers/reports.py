@@ -10,6 +10,7 @@ from app import models
 from app.auth import require_auth
 from app.crud import get_student_or_404
 from app.database import get_db
+from app.history_cleanup import clear_reports, delete_report_row
 from app.schemas import ReportCreate, ReportRead, ReportUpdate
 
 
@@ -96,11 +97,25 @@ def update_report(report_id: int, payload: ReportUpdate, db: Session = Depends(g
     return serialize_report(report)
 
 
+@router.delete("")
+def clear_all_reports(db: Session = Depends(get_db)) -> dict[str, int | str]:
+    deleted_count, reset_count = clear_reports(db)
+    db.commit()
+    return {
+        "message": "汇报记录已清空，对应抽取历史已重置为未处理",
+        "deleted_reports": deleted_count,
+        "reset_draw_histories": reset_count,
+    }
+
+
 @router.delete("/{report_id}")
-def delete_report(report_id: int, db: Session = Depends(get_db)) -> dict[str, str]:
+def delete_report(report_id: int, db: Session = Depends(get_db)) -> dict[str, int | str]:
     report = db.get(models.Report, report_id)
     if report is None:
         raise HTTPException(status_code=404, detail="未找到该汇报记录")
-    db.delete(report)
+    reset = delete_report_row(db, report)
     db.commit()
-    return {"message": "汇报记录已删除"}
+    return {
+        "message": "汇报记录已删除，对应抽取历史已重置为未处理" if reset else "汇报记录已删除",
+        "reset_draw_histories": 1 if reset else 0,
+    }

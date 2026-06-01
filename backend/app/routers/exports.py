@@ -51,6 +51,8 @@ def export_student_stats(db: Session = Depends(get_db)) -> StreamingResponse:
             item["report_count"],
             item["question_count"],
             "是" if item["last_report"] else "否",
+            "是" if item["recently_drawn"] else "否",
+            "是" if item["eligible_for_next_draw"] else "否",
             item["base_weight"],
             item["question_factor"],
             item["cooldown_factor"],
@@ -61,7 +63,22 @@ def export_student_stats(db: Session = Depends(get_db)) -> StreamingResponse:
     ]
     return csv_response(
         "student_stats.csv",
-        ["ID", "姓名", "拼音", "参与抽取", "有效汇报次数", "有效提问次数", "上次是否刚汇报", "基础权重", "提问因子", "冷却因子", "当前权重", "权重说明"],
+        [
+            "ID",
+            "姓名",
+            "拼音",
+            "参与抽取",
+            "有效汇报次数",
+            "有效提问次数",
+            "上次是否刚汇报",
+            "上一批是否刚抽中",
+            "下次是否可抽",
+            "基础权重",
+            "提问因子",
+            "冷却因子",
+            "当前权重",
+            "权重说明",
+        ],
         rows,
     )
 

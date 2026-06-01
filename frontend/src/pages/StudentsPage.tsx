@@ -120,6 +120,8 @@ export default function StudentsPage() {
     },
     { title: "有效汇报", dataIndex: "report_count", sorter: (a, b) => a.report_count - b.report_count },
     { title: "有效提问", dataIndex: "question_count", sorter: (a, b) => a.question_count - b.question_count },
+    { title: "上一批刚抽中", dataIndex: "recently_drawn", render: (value) => (value ? <Tag color="orange">是</Tag> : <Tag>否</Tag>) },
+    { title: "下次可抽", dataIndex: "eligible_for_next_draw", render: (value) => (value ? <Tag color="green">是</Tag> : <Tag>否</Tag>) },
     { title: "当前权重", dataIndex: "weight", sorter: (a, b) => a.weight - b.weight },
     { title: "权重说明", dataIndex: "reason" },
     {
@@ -158,7 +160,7 @@ export default function StudentsPage() {
           刷新
         </Button>
       </div>
-      <Table<StudentStats> rowKey="id" loading={loading} dataSource={filtered} columns={columns} scroll={{ x: 1100 }} />
+      <Table<StudentStats> rowKey="id" loading={loading} dataSource={filtered} columns={columns} scroll={{ x: 1300 }} />
       <Modal title={editing ? "编辑学生" : "新增学生"} open={modalOpen} onOk={saveStudent} onCancel={() => setModalOpen(false)} destroyOnClose>
         <Form form={form} layout="vertical" initialValues={{ active: true }}>
           <Form.Item name="name" label="姓名" rules={[{ required: true, message: "请输入姓名" }]}>

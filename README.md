@@ -191,6 +191,60 @@ sudo systemctl status jump-report-selector-backend
 sudo journalctl -u jump-report-selector-backend -f
 ```
 
+如果 `status` 里看到：
+
+```text
+Active: activating (auto-restart)
+Main PID: ... (code=exited, status=203/EXEC)
+```
+
+通常说明 systemd 无法执行服务文件 `ExecStart` 中的命令，不是 FastAPI 代码本身报错。对于本项目，最常见原因是：
+
+```text
+/usr/local/bin/uv 不存在、不可执行，或软链接失效
+```
+
+先检查 `uv` 的实际位置和软链接：
+
+```bash
+which uv
+uv --version
+ls -l /usr/local/bin/uv
+readlink -f /usr/local/bin/uv
+```
+
+如果 `uv` 实际安装在当前用户目录，例如 `which uv` 输出 `/home/用户名/.local/bin/uv`，可以这样修复：
+
+```bash
+sudo systemctl stop jump-report-selector-backend
+
+# 如果 uv 实际安装在当前用户目录
+which uv
+
+# 假设输出为 /home/用户名/.local/bin/uv
+sudo rm -f /usr/local/bin/uv
+sudo ln -s /home/用户名/.local/bin/uv /usr/local/bin/uv
+/usr/local/bin/uv --version
+
+sudo systemctl daemon-reload
+sudo systemctl restart jump-report-selector-backend
+sudo systemctl status jump-report-selector-backend
+```
+
+如果 `which uv` 没有输出，说明当前 shell 也找不到 `uv`，先重新安装：
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+which uv
+uv --version
+
+sudo rm -f /usr/local/bin/uv
+sudo ln -s "$HOME/.local/bin/uv" /usr/local/bin/uv
+/usr/local/bin/uv --version
+sudo systemctl restart jump-report-selector-backend
+```
+
 后端只监听服务器本机：
 
 ```text
@@ -326,7 +380,202 @@ sudo systemctl reload nginx
 http://你的服务器IP
 ```
 
-阿里云安全组只需要开放 `80`；如果配置 HTTPS，再开放 `443`。不需要开放 `8000`。
+生产环境访问入口是：
+
+```text
+http://服务器公网IP
+```
+
+或你的域名，不是：
+
+```text
+http://服务器公网IP:8000
+```
+
+本项目生产环境不需要公网开放 `8000` 端口，因为后端只监听 `127.0.0.1:8000`，公网访问由 Nginx 转发。
+
+公网访问需要同时满足两个条件：
+
+1. 云平台安全组允许 `80` 端口入站；
+2. 服务器系统防火墙允许 `80` 端口入站。
+
+不要只开启阿里云安全组，而忘记服务器本机防火墙。
+
+阿里云安全组入方向规则：
+
+```text
+协议类型：TCP
+端口范围：80/80
+授权对象：0.0.0.0/0
+```
+
+如果配置 HTTPS，再开放：
+
+```text
+协议类型：TCP
+端口范围：443/443
+授权对象：0.0.0.0/0
+```
+
+Ubuntu 防火墙检查：
+
+```bash
+sudo ufw status verbose
+```
+
+如果 `ufw` 为 active，但没有允许 `80`，执行：
+
+```bash
+sudo ufw allow 80/tcp
+sudo ufw reload
+sudo ufw status verbose
+```
+
+如果使用 HTTPS：
+
+```bash
+sudo ufw allow 443/tcp
+sudo ufw reload
+```
+
+## 部署后无法访问的分层排查
+
+排查时不要一开始就直接看浏览器。先在服务器内部从后端、Nginx API 代理、前端静态文件、端口监听逐层测试。
+
+【服务器】按顺序执行：
+
+```bash
+# 1. 测试后端是否正常
+curl http://127.0.0.1:8000/api/health
+
+# 2. 测试 Nginx 是否正确代理 API
+curl http://127.0.0.1/api/health
+
+# 3. 测试 Nginx 是否能返回前端页面
+curl -I http://127.0.0.1
+
+# 4. 检查 Nginx 是否监听 80 端口
+sudo ss -tlnp | grep ':80'
+
+# 5. 检查前端构建产物是否存在
+ls -lh /opt/jump-report-selector/frontend/dist/index.html
+
+# 6. 检查 Nginx 配置
+sudo nginx -t
+sudo systemctl status nginx
+```
+
+预期结果：
+
+- `curl http://127.0.0.1:8000/api/health` 应返回 `{"status":"ok"}`。
+- `curl http://127.0.0.1/api/health` 应返回 `{"status":"ok"}`。
+- `curl -I http://127.0.0.1` 应返回 `HTTP/1.1 200 OK` 或其他正常 HTTP 响应。
+- `sudo ss -tlnp | grep ':80'` 应显示 Nginx 正在监听 `0.0.0.0:80`、`*:80` 或 `[::]:80`。
+- `/opt/jump-report-selector/frontend/dist/index.html` 必须存在，否则说明前端没有正确上传。
+
+### Nginx 返回 404
+
+如果执行：
+
+```bash
+curl http://127.0.0.1/api/health
+```
+
+返回的是 Nginx 的：
+
+```html
+<title>404 Not Found</title>
+<center>nginx/1.18.0 (Ubuntu)</center>
+```
+
+但：
+
+```bash
+curl http://127.0.0.1:8000/api/health
+```
+
+可以正常返回 `{"status":"ok"}`，说明后端没有问题，问题在 Nginx 的 `/api/` 反向代理规则没有命中。
+
+先检查当前配置：
+
+```bash
+sudo cat /etc/nginx/conf.d/jump-report-selector.conf
+```
+
+建议使用下面的配置。如果暂时没有域名，`server_name _;` 可以接收默认请求：
+
+```nginx
+server {
+    listen 80 default_server;
+    server_name _;
+
+    root /opt/jump-report-selector/frontend/dist;
+    index index.html;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+```
+
+如果 Ubuntu 默认站点 `/etc/nginx/sites-enabled/default` 仍在，可能会接管默认请求，导致自定义配置没有命中。可以禁用默认站点：
+
+```bash
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+如果出现 `duplicate default server`，说明有多个配置同时声明了默认站点。执行：
+
+```bash
+sudo grep -R "default_server" -n /etc/nginx/
+```
+
+找到重复的 `default_server` 配置后，只保留一个。
+
+### 公网访问问题判断表
+
+| 现象 | 可能原因 | 排查重点 |
+| --- | --- | --- |
+| `curl 127.0.0.1:8000/api/health` 不通 | 后端服务未启动或启动失败 | `systemctl status`、`journalctl`、`uv` 路径、环境变量 |
+| `curl 127.0.0.1:8000/api/health` 通，但 `curl 127.0.0.1/api/health` 不通 | Nginx 代理未配置或未命中 | `/etc/nginx/conf.d/jump-report-selector.conf`、默认站点、`nginx -t` |
+| `curl 127.0.0.1/api/health` 通，但浏览器访问公网 IP 不通 | 公网链路问题 | 阿里云安全组、Ubuntu 防火墙、Nginx 是否监听 `0.0.0.0:80` |
+| API 正常，但首页打不开 | 前端 dist 未上传或 root 路径错误 | `/opt/jump-report-selector/frontend/dist/index.html`、Nginx `root` |
+| 首页能打开，但提示无法连接后端 | 前端请求 `/api` 失败 | Nginx `/api/` 代理、浏览器 Network、`curl 公网IP/api/health` |
+
+### 最终验证
+
+服务器本机先验证：
+
+```bash
+curl http://127.0.0.1:8000/api/health
+curl http://127.0.0.1/api/health
+curl -I http://127.0.0.1
+```
+
+然后在本地电脑浏览器访问：
+
+```text
+http://服务器公网IP
+```
+
+也可以在本地电脑终端测试：
+
+```bash
+curl -v http://服务器公网IP
+```
+
+如果服务器本机测试正常，但本地电脑访问超时，优先检查阿里云安全组和服务器防火墙。
 
 ## 后续更新
 
@@ -407,7 +656,7 @@ sudo systemctl start jump-report-selector-backend
 
 ## 抽取规则解释
 
-进入抽取池的学生必须处于 active 状态，且不在本次手动排除名单中。同一次抽取不放回，同一个学生不会重复出现。
+进入抽取池的学生必须处于 active 状态，且不在本次手动排除名单中。同一次抽取不放回，同一个学生不会重复出现。上一批已保存抽取结果中的学生会在下一次抽取中被自动排除；同一页面连续生成未保存预览时，也会临时排除上一轮预览结果。
 
 基础权重：
 
@@ -421,7 +670,7 @@ sudo systemctl start jump-report-selector-backend
 question_factor = max(0.4, 1 - 0.08 * question_count)
 ```
 
-冷却机制：
+汇报冷却机制：
 
 ```python
 cooldown_factor = 0.2  # 上一节课刚有效汇报过
@@ -431,7 +680,10 @@ cooldown_factor = 1    # 否则
 最终权重：
 
 ```python
-weight = max(base_weight * question_factor * cooldown_factor, 0.01)
+if recently_drawn:
+    weight = 0  # 上一批刚抽中过，下一次硬排除
+else:
+    weight = max(base_weight * question_factor * cooldown_factor, 0.01)
 ```
 
 从第 10 次课开始，如果仍有学生尚未有效汇报，系统会在 Dashboard 和随机抽取页面提示；第 11 次课开始额外提示建议优先抽取尚未汇报学生。
@@ -444,6 +696,8 @@ weight = max(base_weight * question_factor * cooldown_factor, 0.01)
 - `其他`：记录备注，但不生成汇报或提问记录。
 
 如果把抽取历史从“做了汇报/提问”改回“未处理/其他”，系统会删除对应自动生成记录，后续权重也会随之恢复。
+
+抽取历史、汇报历史、提问历史都支持单条删除和清空。删除或清空抽取历史时，只会同步删除由这些抽取历史自动生成的汇报/提问记录，手工记录保留；删除或清空由抽取历史生成的汇报/提问记录时，对应抽取历史会重置为 `未处理`。所有权重都会基于剩余记录重新计算。
 
 ## 批量导入学生
 

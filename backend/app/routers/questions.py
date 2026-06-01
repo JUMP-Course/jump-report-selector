@@ -10,6 +10,7 @@ from app import models
 from app.auth import require_auth
 from app.crud import get_student_or_404
 from app.database import get_db
+from app.history_cleanup import clear_questions, delete_question_row
 from app.schemas import QuestionCreate, QuestionRead, QuestionUpdate
 
 
@@ -107,11 +108,25 @@ def update_question(question_id: int, payload: QuestionUpdate, db: Session = Dep
     return serialize_question(question)
 
 
+@router.delete("")
+def clear_all_questions(db: Session = Depends(get_db)) -> dict[str, int | str]:
+    deleted_count, reset_count = clear_questions(db)
+    db.commit()
+    return {
+        "message": "提问记录已清空，对应抽取历史已重置为未处理",
+        "deleted_questions": deleted_count,
+        "reset_draw_histories": reset_count,
+    }
+
+
 @router.delete("/{question_id}")
-def delete_question(question_id: int, db: Session = Depends(get_db)) -> dict[str, str]:
+def delete_question(question_id: int, db: Session = Depends(get_db)) -> dict[str, int | str]:
     question = db.get(models.Question, question_id)
     if question is None:
         raise HTTPException(status_code=404, detail="未找到该提问记录")
-    db.delete(question)
+    reset = delete_question_row(db, question)
     db.commit()
-    return {"message": "提问记录已删除"}
+    return {
+        "message": "提问记录已删除，对应抽取历史已重置为未处理" if reset else "提问记录已删除",
+        "reset_draw_histories": 1 if reset else 0,
+    }
