@@ -57,31 +57,44 @@ http://localhost:5173
 http://localhost:8000/docs
 ```
 
-## 服务器部署：不使用 Docker
+## 部署方式速览
 
-推荐生产部署方式：
+| 方式 | 适合场景 | 服务器是否需要构建前端 | 说明 |
+| --- | --- | --- | --- |
+| 本地构建前端后上传 `dist` | 低配云服务器，推荐生产方式 | 不需要 | 后端仍在服务器用 `uv + systemd` 运行，Nginx 托管本地上传的静态文件。 |
+| 服务器手动构建前端 | 服务器 CPU/内存足够 | 需要 | 服务器安装 Node/npm，直接在 `/opt/jump-report-selector/frontend` 执行 `npm run build`。 |
+| Docker Compose | 本机或服务器能构建镜像，或已有镜像构建流程 | 由 Docker 构建阶段完成 | 简单但构建更吃资源；如果本地构建镜像再上传，要注意服务器 CPU 架构。 |
 
-- 后端：`uv` 管理依赖，`systemd` 常驻运行 FastAPI。
-- 前端：`npm run build` 生成静态文件，Nginx 托管。
-- 数据：SQLite 放在独立目录，例如 `/opt/jump-report-selector-data`。
+生产环境推荐把代码、数据、配置分开：
 
-### 1. 安装系统依赖
+- 代码目录：`/opt/jump-report-selector`
+- SQLite 数据：`/opt/jump-report-selector-data/jump_course.sqlite3`
+- 后端环境变量：`/etc/jump-report-selector.env`
+- 前端静态文件：`/opt/jump-report-selector/frontend/dist`
+
+不要上传 `node_modules`、本地 `.venv`、本地 `.env` 到服务器，也不要在更新代码时覆盖 `/opt/jump-report-selector-data`。`.venv` 不能可靠地跨操作系统或 CPU 架构复制，后端依赖应在服务器上通过 `uv sync --frozen` 安装。
+
+## 推荐生产部署：本地构建前端后上传
+
+这条路线适合低配云服务器：服务器只负责运行后端、托管静态文件和保存 SQLite 数据，不在服务器上跑前端构建。
+
+### 1. 安装服务器依赖
 
 Ubuntu/Debian：
 
 ```bash
 sudo apt update
-sudo apt install -y nginx git curl nodejs npm
+sudo apt install -y nginx git curl
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
-
-> 这样安装的各种软件可能版本会比较旧，建议检查版本是否合适，否则使用其他安装方式。
 
 如果 `uv` 安装在 `~/.local/bin/uv`，建议建一个系统路径软链接：
 
 ```bash
 sudo ln -s ~/.local/bin/uv /usr/local/bin/uv
 ```
+
+> 如果你选择“服务器手动构建前端”，还需要安装 Node/npm；推荐路线不需要服务器安装 Node/npm。
 
 ### 2. 上传或拉取代码
 
@@ -91,7 +104,7 @@ sudo ln -s ~/.local/bin/uv /usr/local/bin/uv
 /opt/jump-report-selector
 ```
 
-示例：
+首次创建目录：
 
 ```bash
 sudo mkdir -p /opt/jump-report-selector
@@ -99,7 +112,7 @@ sudo chown -R $USER:$USER /opt/jump-report-selector
 cd /opt/jump-report-selector
 ```
 
-然后上传项目文件，或用 Git 拉取你的仓库。
+然后上传项目文件，或用 Git 拉取你的仓库。上传项目文件时不要把本地 `node_modules`、`.venv`、`.env`、`backend/data` 和旧的 `frontend/dist` 一起传上去。
 
 ### 3. 创建独立数据目录
 
@@ -109,13 +122,13 @@ sudo mkdir -p /opt/jump-report-selector-cache/uv
 sudo chown -R $USER:$USER /opt/jump-report-selector-data /opt/jump-report-selector-cache
 ```
 
-这里会保存：
+SQLite 会保存在：
 
 ```text
 /opt/jump-report-selector-data/jump_course.sqlite3
 ```
 
-后续更新代码、重新构建前端、重启服务，都不会覆盖这个文件。
+后续更新代码、重新上传前端、重启服务，都不会覆盖这个文件。
 
 ### 4. 配置生产环境变量
 
@@ -140,6 +153,8 @@ CORS_ORIGINS=http://你的服务器IP,https://你的域名
 CORS_ORIGINS=http://你的服务器IP
 ```
 
+可参考 `deploy/jump-report-selector.env.example`。
+
 ### 5. 初始化后端
 
 ```bash
@@ -160,8 +175,6 @@ uv run python scripts/seed_demo_data.py
 正式使用时通常不需要导入示例数据。
 
 ### 6. 配置 systemd 后端服务
-
-复制示例服务文件：
 
 ```bash
 sudo cp /opt/jump-report-selector/deploy/jump-report-selector-backend.service /etc/systemd/system/jump-report-selector-backend.service
@@ -185,18 +198,41 @@ http://127.0.0.1:8000
 
 公网访问由 Nginx 代理，不需要开放服务器安全组的 `8000` 端口。
 
-### 7. 构建前端
+### 7. 本地构建前端并上传
+
+在本地电脑项目目录中构建：
 
 ```bash
-cd /opt/jump-report-selector/frontend
-npm install
+cd frontend
+npm ci
 npm run build
+cd ..
 ```
 
-构建产物位于：
+构建产物位于本地：
 
 ```text
-/opt/jump-report-selector/frontend/dist
+frontend/dist
+```
+
+上传方式一：使用 `rsync` 同步到服务器：
+
+```bash
+rsync -av --delete frontend/dist/ 用户名@你的服务器IP:/opt/jump-report-selector/frontend/dist/
+```
+
+上传方式二：使用 `tar` 和 `scp`：
+
+```bash
+tar -czf frontend-dist.tar.gz -C frontend dist
+scp frontend-dist.tar.gz 用户名@你的服务器IP:/tmp/frontend-dist.tar.gz
+```
+
+然后在服务器上解压：
+
+```bash
+mkdir -p /opt/jump-report-selector/frontend
+tar -xzf /tmp/frontend-dist.tar.gz -C /opt/jump-report-selector/frontend
 ```
 
 ### 8. 配置 Nginx
@@ -225,6 +261,12 @@ server_name your-domain.example.com;
 server_name _;
 ```
 
+该配置会把前端根目录指向：
+
+```text
+/opt/jump-report-selector/frontend/dist
+```
+
 检查并重载 Nginx：
 
 ```bash
@@ -238,38 +280,78 @@ sudo systemctl reload nginx
 http://你的服务器IP
 ```
 
-阿里云安全组只需要开放 `80`，如果配置 HTTPS 再开放 `443`。
+阿里云安全组只需要开放 `80`；如果配置 HTTPS，再开放 `443`。
 
-### 9. 后续更新代码
+### 9. 后续更新
 
-更新代码不会改动 `/opt/jump-report-selector-data` 里的 SQLite 数据。
+只更新前端时，在本地重新构建并上传 `frontend/dist`：
+
+```bash
+cd frontend
+npm ci
+npm run build
+rsync -av --delete dist/ 用户名@你的服务器IP:/opt/jump-report-selector/frontend/dist/
+```
+
+然后在服务器上重载 Nginx：
+
+```bash
+sudo systemctl reload nginx
+```
+
+更新后端代码时，在服务器上拉取或上传代码，再同步依赖并重启后端：
 
 ```bash
 cd /opt/jump-report-selector
 git pull
-
 cd backend
 uv sync --frozen
 sudo systemctl restart jump-report-selector-backend
+```
 
-cd ../frontend
+更新不会改动 `/opt/jump-report-selector-data` 里的 SQLite 数据。
+
+## 服务器手动构建前端
+
+如果服务器配置足够，也可以直接在服务器上构建前端。这种方式和推荐生产部署的步骤基本一致，只需要在第 1 步额外安装 Node/npm：
+
+```bash
+sudo apt install -y nodejs npm
+```
+
+然后用服务器本机执行前端构建：
+
+```bash
+cd /opt/jump-report-selector/frontend
 npm install
 npm run build
 sudo systemctl reload nginx
 ```
 
+构建产物仍位于：
+
+```text
+/opt/jump-report-selector/frontend/dist
+```
+
+低配服务器如果在这一步卡死、内存不足或构建很慢，改用“本地构建前端后上传”即可。
+
 ## Docker Compose 部署（可选）
+
+复制环境变量并按需修改密码、JWT 密钥、CORS 和数据目录：
 
 ```bash
 cp .env.example .env
 docker compose up -d --build
 ```
 
-访问：
+默认访问：
 
 ```text
-http://localhost:3000
+http://服务器IP:3000
 ```
+
+如果希望通过 `80` 端口访问，可以用 `deploy/nginx.conf` 做反向代理；安全组开放 `80`，不需要直接对公网开放 `8000`。
 
 查看日志：
 
@@ -290,15 +372,15 @@ volumes:
   - ${DATA_DIR:-./backend/data}:/app/data
 ```
 
-本地开发默认使用 `./backend/data`。服务器部署建议在 `.env` 中设置 `DATA_DIR=/opt/jump-report-selector-data`，这样代码目录和 SQLite 数据目录分离，后续 `git pull` 或重新构建镜像不会覆盖学生名单和历史记录。
+本地开发默认使用 `./backend/data`。服务器 Docker 部署建议在 `.env` 中设置：
 
-## 阿里云服务器要点（非 Docker）
+```env
+DATA_DIR=/opt/jump-report-selector-data
+```
 
-- 安全组开放 `80`；如果配置 HTTPS，再开放 `443`。
-- 不需要开放 `8000`，后端只监听 `127.0.0.1:8000`，由 Nginx 代理 `/api/`。
-- 代码建议放在 `/opt/jump-report-selector`。
-- 数据库建议放在 `/opt/jump-report-selector-data/jump_course.sqlite3`。
-- 环境变量建议放在 `/etc/jump-report-selector.env`，可参考 `deploy/jump-report-selector.env.example`。
+这样代码目录和 SQLite 数据目录分离，后续 `git pull` 或重新构建镜像不会覆盖学生名单和历史记录。
+
+如果要在本地构建 Docker 镜像再上传到服务器，请确认镜像平台匹配服务器 CPU 架构。例如本地是 Apple Silicon、服务器是常见 x86_64 Linux 时，需要为 `linux/amd64` 构建镜像。
 
 ## 环境变量
 
@@ -310,7 +392,13 @@ volumes:
 | `CORS_ORIGINS` | 允许访问 API 的前端地址 | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000` |
 | `DATA_DIR` | 仅 Docker Compose 使用的宿主机数据目录 | `./backend/data` |
 
-修改 `.env` 中的 `APP_PASSWORD`、`JWT_SECRET`、`DATABASE_URL` 或 `CORS_ORIGINS` 后，需要重启后端服务才会生效。
+非 Docker 生产部署修改 `/etc/jump-report-selector.env` 后，需要重启后端服务才会生效：
+
+```bash
+sudo systemctl restart jump-report-selector-backend
+```
+
+Docker Compose 部署修改 `.env` 后，需要重建或重启容器。
 
 ## 数据库备份和恢复
 
