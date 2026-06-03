@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date as DateType, datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -108,7 +108,7 @@ class StudentImportResponse(BaseModel):
 
 class CourseSessionBase(BaseModel):
     lesson: int = Field(ge=1)
-    date: date
+    date: DateType
     title: Optional[str] = Field(default=None, max_length=200)
     note: Optional[str] = None
 
@@ -119,7 +119,7 @@ class CourseSessionCreate(CourseSessionBase):
 
 class CourseSessionUpdate(BaseModel):
     lesson: Optional[int] = Field(default=None, ge=1)
-    date: Optional[date] = None
+    date: Optional[DateType] = None
     title: Optional[str] = Field(default=None, max_length=200)
     note: Optional[str] = None
 
@@ -134,7 +134,7 @@ class CourseSessionRead(CourseSessionBase):
 
 class ReportBase(BaseModel):
     lesson: int = Field(ge=1)
-    date: date
+    date: DateType
     student_id: int
     report_type: ReportType
     draw_history_id: Optional[int] = None
@@ -148,7 +148,7 @@ class ReportCreate(ReportBase):
 
 class ReportUpdate(BaseModel):
     lesson: Optional[int] = Field(default=None, ge=1)
-    date: Optional[date] = None
+    date: Optional[DateType] = None
     student_id: Optional[int] = None
     report_type: Optional[ReportType] = None
     draw_history_id: Optional[int] = None
@@ -168,7 +168,7 @@ class ReportRead(ReportBase):
 
 class QuestionBase(BaseModel):
     lesson: int = Field(ge=1)
-    date: date
+    date: DateType
     questioner_id: int
     reporter_id: Optional[int] = None
     question_type: QuestionType
@@ -184,7 +184,7 @@ class QuestionCreate(QuestionBase):
 
 class QuestionUpdate(BaseModel):
     lesson: Optional[int] = Field(default=None, ge=1)
-    date: Optional[date] = None
+    date: Optional[DateType] = None
     questioner_id: Optional[int] = None
     reporter_id: Optional[int] = None
     question_type: Optional[QuestionType] = None
@@ -208,7 +208,7 @@ class QuestionRead(QuestionBase):
 
 class DrawPreviewRequest(BaseModel):
     lesson: int = Field(ge=1)
-    date: date
+    date: DateType
     count: int = Field(default=1, ge=0)
     excluded_student_ids: list[int] = Field(default_factory=list)
 
@@ -234,7 +234,7 @@ class DrawPreviewResponse(BaseModel):
 class DrawSaveRequest(BaseModel):
     batch_id: str
     lesson: int = Field(ge=1)
-    date: date
+    date: DateType
     results: list[DrawResult]
 
 
@@ -248,7 +248,7 @@ class DrawHistoryRead(BaseModel):
 
     id: int
     lesson: int
-    date: date
+    date: DateType
     student_id: int
     student_name: str
     student_pinyin: str
