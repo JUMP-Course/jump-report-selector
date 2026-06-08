@@ -31,4 +31,5 @@ def student_has_history(db: Session, student_id: int) -> bool:
     )
     reporter_exists = db.scalar(select(models.Question.id).where(models.Question.reporter_id == student_id).limit(1))
     draw_exists = db.scalar(select(models.DrawHistory.id).where(models.DrawHistory.student_id == student_id).limit(1))
-    return any([report_exists, question_exists, reporter_exists, draw_exists])
+    absence_exists = db.scalar(select(models.StudentAbsence.id).where(models.StudentAbsence.student_id == student_id).limit(1))
+    return any([report_exists, question_exists, reporter_exists, draw_exists, absence_exists])

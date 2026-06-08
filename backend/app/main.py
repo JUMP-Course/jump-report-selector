@@ -13,7 +13,7 @@ from app.auth import require_auth
 from app.config import get_settings
 from app.database import Base, engine, get_db
 from app.migrations import run_lightweight_migrations
-from app.routers import auth, course_sessions, draws, exports, questions, reports, students
+from app.routers import absences, auth, course_sessions, draws, exports, questions, reports, students
 from app.routers.draws import serialize_draw_history
 from app.schemas import DashboardResponse
 
@@ -39,6 +39,7 @@ def create_tables() -> None:
 
 app.include_router(auth.router)
 app.include_router(students.router)
+app.include_router(absences.router)
 app.include_router(reports.router)
 app.include_router(questions.router)
 app.include_router(draws.router)

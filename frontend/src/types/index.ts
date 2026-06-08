@@ -53,6 +53,16 @@ export interface CourseSession {
   updated_at: string;
 }
 
+export interface StudentAbsence {
+  id: number;
+  lesson: number;
+  student_id: number;
+  student_name: string;
+  student_pinyin: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ReportRecord {
   id: number;
   lesson: number;

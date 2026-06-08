@@ -132,6 +132,22 @@ class CourseSessionRead(CourseSessionBase):
     updated_at: datetime
 
 
+class StudentAbsenceReplaceRequest(BaseModel):
+    student_ids: list[int] = Field(default_factory=list)
+
+
+class StudentAbsenceRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    lesson: int
+    student_id: int
+    student_name: str
+    student_pinyin: str
+    created_at: datetime
+    updated_at: datetime
+
+
 class ReportBase(BaseModel):
     lesson: int = Field(ge=1)
     date: DateType

@@ -5,6 +5,8 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.pool import StaticPool
@@ -12,9 +14,13 @@ from sqlalchemy.pool import StaticPool
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import models
+from app.auth import require_auth
+from app.crud import student_has_history
 from app.database import Base
-from app.draw_logic import compute_student_stats, weighted_draw
+from app.database import get_db
+from app.draw_logic import compute_student_stats, save_draw_results, weighted_draw
 from app.history_cleanup import clear_questions, clear_reports, delete_draw_history_row, delete_report_row
+from app.routers import absences
 
 
 @pytest.fixture
@@ -52,6 +58,13 @@ def _draw_history(db: Session, student: models.Student, batch_id: str) -> models
     return row
 
 
+def _absence(db: Session, student: models.Student, lesson: int) -> models.StudentAbsence:
+    row = models.StudentAbsence(lesson=lesson, student_id=student.id)
+    db.add(row)
+    db.flush()
+    return row
+
+
 def test_latest_saved_draw_batch_is_excluded_from_next_draw(db: Session) -> None:
     students = [_student(db, f"学生{index}", f"s{index}") for index in range(1, 5)]
     _draw_history(db, students[0], "old-batch")
@@ -70,6 +83,79 @@ def test_latest_saved_draw_batch_is_excluded_from_next_draw(db: Session) -> None
     assert stats_by_id[students[1].id]["recently_drawn"] is True
     assert stats_by_id[students[1].id]["eligible_for_next_draw"] is False
     assert stats_by_id[students[1].id]["weight"] == 0
+
+
+def test_absent_students_are_excluded_from_lesson_draw(db: Session) -> None:
+    students = [_student(db, f"学生{index}", f"s{index}") for index in range(1, 5)]
+    _absence(db, students[0], lesson=2)
+    db.commit()
+
+    result = weighted_draw(db, lesson=2, date=date(2026, 3, 8), count=10)
+
+    selected_ids = {item["student_id"] for item in result["results"]}
+    assert students[0].id not in selected_ids
+    assert len(result["results"]) == 3
+    assert "本课请假的 1 名学生已自动排除" in result["warnings"]
+
+
+def test_save_draw_rejects_stale_preview_with_absent_student(db: Session) -> None:
+    student = _student(db, "张三", "zhangsan")
+    _absence(db, student, lesson=3)
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        save_draw_results(
+            db,
+            batch_id="stale-preview",
+            lesson=3,
+            date=date(2026, 3, 15),
+            results=[{"student_id": student.id, "weight": 10, "reason": "test"}],
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "请假学生不能保存到抽取历史：张三" == exc_info.value.detail
+    assert db.scalar(select(func.count(models.DrawHistory.id))) == 0
+
+
+def test_replace_lesson_absences_api_adds_removes_and_deduplicates(db: Session) -> None:
+    first = _student(db, "甲同学", "ajia")
+    second = _student(db, "乙同学", "byi")
+    third = _student(db, "丙同学", "cbing")
+    _absence(db, third, lesson=4)
+    db.commit()
+
+    app = FastAPI()
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[require_auth] = lambda: "test"
+    app.include_router(absences.router)
+
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/absences/lesson/4",
+            json={"student_ids": [second.id, first.id, second.id]},
+        )
+        assert response.status_code == 200
+        assert [item["student_id"] for item in response.json()] == [first.id, second.id]
+
+        rows = db.scalars(select(models.StudentAbsence).where(models.StudentAbsence.lesson == 4)).all()
+        assert {row.student_id for row in rows} == {first.id, second.id}
+        assert len(rows) == 2
+
+        response = client.put("/api/absences/lesson/4", json={"student_ids": [second.id]})
+        assert response.status_code == 200
+        assert [item["student_id"] for item in response.json()] == [second.id]
+
+        response = client.get("/api/absences/lesson/4")
+        assert response.status_code == 200
+        assert [item["student_id"] for item in response.json()] == [second.id]
+
+
+def test_absence_counts_as_student_history(db: Session) -> None:
+    student = _student(db, "李四", "lisi")
+    _absence(db, student, lesson=5)
+    db.commit()
+
+    assert student_has_history(db, student.id) is True
 
 
 def test_delete_draw_history_removes_only_linked_auto_records(db: Session) -> None:

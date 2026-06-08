@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -33,6 +33,18 @@ class Student(TimestampMixin, Base):
         back_populates="questioner",
         foreign_keys="Question.questioner_id",
     )
+    absences: Mapped[list["StudentAbsence"]] = relationship(back_populates="student")
+
+
+class StudentAbsence(TimestampMixin, Base):
+    __tablename__ = "student_absences"
+    __table_args__ = (UniqueConstraint("lesson", "student_id", name="uq_student_absences_lesson_student"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    lesson: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), nullable=False, index=True)
+
+    student: Mapped[Student] = relationship(back_populates="absences")
 
 
 class Report(TimestampMixin, Base):

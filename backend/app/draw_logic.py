@@ -57,6 +57,12 @@ def get_latest_draw_batch_student_ids(db: Session) -> set[int]:
     )
 
 
+def get_lesson_absent_student_ids(db: Session, lesson: int) -> set[int]:
+    return set(
+        db.scalars(select(models.StudentAbsence.student_id).where(models.StudentAbsence.lesson == lesson)).all()
+    )
+
+
 def compute_student_stats(db: Session, target_lesson: Optional[int] = None) -> list[dict[str, Any]]:
     """Return explainable draw statistics for every student."""
     students = db.scalars(select(models.Student).order_by(models.Student.pinyin)).all()
@@ -135,6 +141,7 @@ def build_draw_warnings(
     available_count: int,
     target_count: int,
     recently_excluded_count: int = 0,
+    absent_excluded_count: int = 0,
 ) -> list[str]:
     warnings: list[str] = []
     unreported_count = db.scalar(
@@ -150,6 +157,8 @@ def build_draw_warnings(
 
     if recently_excluded_count > 0:
         warnings.append(f"上一批抽中过的 {recently_excluded_count} 名学生已自动排除")
+    if absent_excluded_count > 0:
+        warnings.append(f"本课请假的 {absent_excluded_count} 名学生已自动排除")
     if available_count < target_count:
         warnings.append(f"可抽取学生只有 {available_count} 人，少于目标人数 {target_count} 人，已抽取全部可用学生")
     if lesson >= 10 and unreported_count > 0:
@@ -167,11 +176,21 @@ def weighted_draw(
     excluded_student_ids: Optional[list[int]] = None,
 ) -> dict[str, Any]:
     del date
-    excluded = set(excluded_student_ids or [])
+    manual_excluded = set(excluded_student_ids or [])
+    absent_student_ids = get_lesson_absent_student_ids(db, lesson)
+    excluded = manual_excluded | absent_student_ids
     target_count = count
     stats = compute_student_stats(db, target_lesson=lesson)
     candidates = [item for item in stats if item["eligible_for_next_draw"] and item["id"] not in excluded]
-    recently_excluded_count = sum(1 for item in stats if item["active"] and item["recently_drawn"] and item["id"] not in excluded)
+    recently_excluded_count = sum(
+        1
+        for item in stats
+        if item["active"]
+        and item["recently_drawn"]
+        and item["id"] not in manual_excluded
+        and item["id"] not in absent_student_ids
+    )
+    absent_excluded_count = sum(1 for item in stats if item["active"] and item["id"] in absent_student_ids)
 
     selected: list[dict[str, Any]] = []
     remaining = candidates.copy()
@@ -195,7 +214,14 @@ def weighted_draw(
     return {
         "batch_id": str(uuid.uuid4()),
         "results": selected,
-        "warnings": build_draw_warnings(db, lesson, len(candidates), target_count, recently_excluded_count),
+        "warnings": build_draw_warnings(
+            db,
+            lesson,
+            len(candidates),
+            target_count,
+            recently_excluded_count,
+            absent_excluded_count,
+        ),
     }
 
 
@@ -210,9 +236,22 @@ def save_draw_results(
     if existing is not None:
         raise HTTPException(status_code=400, detail="该批次抽取结果已经保存，请勿重复保存")
 
+    payloads = [result if isinstance(result, dict) else result.model_dump() for result in results]
+    absent_student_ids = get_lesson_absent_student_ids(db, lesson)
+    stale_student_ids = sorted({payload["student_id"] for payload in payloads} & absent_student_ids)
+    if stale_student_ids:
+        names = list(
+            db.scalars(
+                select(models.Student.name)
+                .where(models.Student.id.in_(stale_student_ids))
+                .order_by(models.Student.pinyin)
+            ).all()
+        )
+        blocked_students = "、".join(names or [str(student_id) for student_id in stale_student_ids])
+        raise HTTPException(status_code=400, detail=f"请假学生不能保存到抽取历史：{blocked_students}")
+
     rows: list[models.DrawHistory] = []
-    for result in results:
-        payload = result if isinstance(result, dict) else result.model_dump()
+    for payload in payloads:
         row = models.DrawHistory(
             lesson=lesson,
             date=date,
