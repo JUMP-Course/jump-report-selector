@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Path
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
@@ -13,10 +15,19 @@ from app.schemas import StudentAbsenceRead, StudentAbsenceReplaceRequest
 router = APIRouter(prefix="/api/absences", tags=["absences"], dependencies=[Depends(require_auth)])
 
 
-def serialize_absence(row: models.StudentAbsence) -> dict:
+def _course_session_by_lesson(db: Session, lessons: set[int]) -> dict[int, models.CourseSession]:
+    if not lessons:
+        return {}
+    sessions = db.scalars(select(models.CourseSession).where(models.CourseSession.lesson.in_(lessons))).all()
+    return {session.lesson: session for session in sessions}
+
+
+def serialize_absence(row: models.StudentAbsence, session: models.CourseSession | None = None) -> dict:
     return {
         "id": row.id,
         "lesson": row.lesson,
+        "course_date": session.date if session else None,
+        "course_title": session.title if session else None,
         "student_id": row.student_id,
         "student_name": row.student.name,
         "student_pinyin": row.student.pinyin,
@@ -37,12 +48,46 @@ def _list_lesson_absences(db: Session, lesson: int) -> list[models.StudentAbsenc
     )
 
 
+@router.get("", response_model=list[StudentAbsenceRead])
+def list_absences(
+    lesson: Optional[int] = Query(default=None, ge=1),
+    student_id: Optional[int] = Query(default=None, ge=1),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    statement = (
+        select(models.StudentAbsence)
+        .join(models.StudentAbsence.student)
+        .options(joinedload(models.StudentAbsence.student))
+    )
+    if lesson is not None:
+        statement = statement.where(models.StudentAbsence.lesson == lesson)
+    if student_id is not None:
+        statement = statement.where(models.StudentAbsence.student_id == student_id)
+    statement = statement.order_by(models.StudentAbsence.lesson, models.Student.pinyin)
+
+    rows = list(db.scalars(statement).all())
+    sessions_by_lesson = _course_session_by_lesson(db, {row.lesson for row in rows})
+    return [serialize_absence(row, sessions_by_lesson.get(row.lesson)) for row in rows]
+
+
 @router.get("/lesson/{lesson}", response_model=list[StudentAbsenceRead])
 def list_lesson_absences(
     lesson: int = Path(ge=1),
     db: Session = Depends(get_db),
 ) -> list[dict]:
-    return [serialize_absence(row) for row in _list_lesson_absences(db, lesson)]
+    rows = _list_lesson_absences(db, lesson)
+    sessions_by_lesson = _course_session_by_lesson(db, {lesson})
+    return [serialize_absence(row, sessions_by_lesson.get(row.lesson)) for row in rows]
+
+
+@router.delete("/{absence_id}")
+def delete_absence(absence_id: int, db: Session = Depends(get_db)) -> dict[str, str]:
+    row = db.get(models.StudentAbsence, absence_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="未找到该请假记录")
+    db.delete(row)
+    db.commit()
+    return {"message": "请假记录已取消"}
 
 
 @router.put("/lesson/{lesson}", response_model=list[StudentAbsenceRead])
@@ -72,4 +117,6 @@ def replace_lesson_absences(
             db.add(models.StudentAbsence(lesson=lesson, student_id=student_id))
 
     db.commit()
-    return [serialize_absence(row) for row in _list_lesson_absences(db, lesson)]
+    rows = _list_lesson_absences(db, lesson)
+    sessions_by_lesson = _course_session_by_lesson(db, {lesson})
+    return [serialize_absence(row, sessions_by_lesson.get(row.lesson)) for row in rows]

@@ -141,6 +141,8 @@ class StudentAbsenceRead(BaseModel):
 
     id: int
     lesson: int
+    course_date: Optional[DateType] = None
+    course_title: Optional[str] = None
     student_id: int
     student_name: str
     student_pinyin: str

@@ -6,13 +6,12 @@ import type { Dayjs } from "dayjs";
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import WeightExplanation from "../components/WeightExplanation";
-import type { CourseSession, DrawPreviewResponse, DrawResult, Student, StudentAbsence } from "../types";
+import type { CourseSession, DrawPreviewResponse, DrawResult, Student } from "../types";
 
 type DrawFormValues = {
   lesson: number;
   date: Dayjs;
   count: number;
-  absence_student_ids: number[];
   excluded_student_ids: number[];
 };
 
@@ -22,13 +21,9 @@ export default function DrawPage() {
   const [preview, setPreview] = useState<DrawPreviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [absenceLoading, setAbsenceLoading] = useState(false);
-  const [absenceSaving, setAbsenceSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [lastPreviewStudentIds, setLastPreviewStudentIds] = useState<number[]>([]);
   const [form] = Form.useForm<DrawFormValues>();
-  const watchedLesson = Form.useWatch("lesson", form);
-  const selectedLesson = watchedLesson ?? form.getFieldValue("lesson");
   const [messageApi, contextHolder] = message.useMessage();
 
   useEffect(() => {
@@ -43,58 +38,10 @@ export default function DrawPage() {
       .catch((error) => messageApi.error(error instanceof Error ? error.message : "加载基础数据失败"));
   }, [form, messageApi]);
 
-  useEffect(() => {
-    if (typeof selectedLesson !== "number") return;
-    let cancelled = false;
-    setAbsenceLoading(true);
-    void api
-      .get<StudentAbsence[]>(`/absences/lesson/${selectedLesson}`)
-      .then((data) => {
-        if (!cancelled) {
-          form.setFieldsValue({ absence_student_ids: data.map((item) => item.student_id) });
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          messageApi.error(error instanceof Error ? error.message : "加载请假名单失败");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setAbsenceLoading(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [form, messageApi, selectedLesson]);
-
-  const syncAbsences = async (lesson: number, studentIds: number[]) => {
-    const savedAbsences = await api.put<StudentAbsence[]>(`/absences/lesson/${lesson}`, {
-      student_ids: studentIds
-    });
-    form.setFieldsValue({ absence_student_ids: savedAbsences.map((item) => item.student_id) });
-    return savedAbsences;
-  };
-
-  const saveAbsences = async () => {
-    const values = await form.validateFields(["lesson", "absence_student_ids"]);
-    setAbsenceSaving(true);
-    try {
-      await syncAbsences(values.lesson, values.absence_student_ids ?? []);
-      messageApi.success("请假名单已保存");
-    } catch (error) {
-      messageApi.error(error instanceof Error ? error.message : "保存请假名单失败");
-    } finally {
-      setAbsenceSaving(false);
-    }
-  };
-
   const generate = async () => {
     const values = await form.validateFields();
     setLoading(true);
     try {
-      await syncAbsences(values.lesson, values.absence_student_ids ?? []);
       const excludedStudentIds = Array.from(new Set([...(values.excluded_student_ids ?? []), ...lastPreviewStudentIds]));
       const payload = {
         lesson: values.lesson,
@@ -119,7 +66,6 @@ export default function DrawPage() {
     const values = await form.validateFields();
     setSaving(true);
     try {
-      await syncAbsences(values.lesson, values.absence_student_ids ?? []);
       await api.post("/draws/save", {
         batch_id: preview.batch_id,
         lesson: values.lesson,
@@ -162,7 +108,7 @@ export default function DrawPage() {
         <Alert type="info" showIcon message="今天没有匹配课程日程，请手动填写课次和日期" style={{ marginBottom: 12 }} />
       )}
       <div className="content-band">
-        <Form form={form} layout="inline" initialValues={{ lesson: 1, date: dayjs(), count: 1, absence_student_ids: [], excluded_student_ids: [] }}>
+        <Form form={form} layout="inline" initialValues={{ lesson: 1, date: dayjs(), count: 1, excluded_student_ids: [] }}>
           <Form.Item name="lesson" label="第几次课" rules={[{ required: true, message: "请输入课次" }]}>
             <InputNumber min={1} />
           </Form.Item>
@@ -172,17 +118,11 @@ export default function DrawPage() {
           <Form.Item name="count" label="抽取人数">
             <InputNumber min={0} />
           </Form.Item>
-          <Form.Item name="absence_student_ids" label="请假学生" style={{ minWidth: 280 }}>
-            <Select mode="multiple" allowClear showSearch loading={absenceLoading} options={studentOptions} optionFilterProp="label" />
-          </Form.Item>
           <Form.Item name="excluded_student_ids" label="本次额外排除" style={{ minWidth: 280 }}>
             <Select mode="multiple" allowClear showSearch options={studentOptions} optionFilterProp="label" />
           </Form.Item>
         </Form>
         <Space style={{ marginTop: 16 }}>
-          <Button icon={<SaveOutlined />} loading={absenceSaving} disabled={absenceLoading} onClick={saveAbsences}>
-            保存请假名单
-          </Button>
           <Button type="primary" icon={<ThunderboltOutlined />} loading={loading} onClick={generate}>
             生成抽取结果
           </Button>

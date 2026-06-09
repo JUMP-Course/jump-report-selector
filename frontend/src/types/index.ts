@@ -56,6 +56,8 @@ export interface CourseSession {
 export interface StudentAbsence {
   id: number;
   lesson: number;
+  course_date?: string | null;
+  course_title?: string | null;
   student_id: number;
   student_name: string;
   student_pinyin: string;

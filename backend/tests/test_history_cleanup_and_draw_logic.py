@@ -150,6 +150,53 @@ def test_replace_lesson_absences_api_adds_removes_and_deduplicates(db: Session) 
         assert [item["student_id"] for item in response.json()] == [second.id]
 
 
+def test_absence_detail_api_lists_filters_and_deletes_records(db: Session) -> None:
+    first = _student(db, "甲同学", "ajia")
+    second = _student(db, "乙同学", "byi")
+    third = _student(db, "丙同学", "cbing")
+    first_absence = _absence(db, first, lesson=1)
+    second_absence = _absence(db, second, lesson=1)
+    third_absence = _absence(db, third, lesson=2)
+    db.add_all(
+        [
+            models.CourseSession(lesson=1, date=date(2026, 3, 1), title="数据清洗"),
+            models.CourseSession(lesson=2, date=date(2026, 3, 8), title="可视化"),
+        ]
+    )
+    db.commit()
+
+    app = FastAPI()
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[require_auth] = lambda: "test"
+    app.include_router(absences.router)
+
+    with TestClient(app) as client:
+        response = client.get("/api/absences")
+        assert response.status_code == 200
+        data = response.json()
+        assert [item["id"] for item in data] == [first_absence.id, second_absence.id, third_absence.id]
+        assert data[0]["course_date"] == "2026-03-01"
+        assert data[0]["course_title"] == "数据清洗"
+        assert data[2]["course_date"] == "2026-03-08"
+        assert data[2]["course_title"] == "可视化"
+
+        response = client.get("/api/absences?lesson=1")
+        assert response.status_code == 200
+        assert [item["student_id"] for item in response.json()] == [first.id, second.id]
+
+        response = client.get(f"/api/absences?student_id={third.id}")
+        assert response.status_code == 200
+        assert [item["id"] for item in response.json()] == [third_absence.id]
+
+        response = client.delete(f"/api/absences/{second_absence.id}")
+        assert response.status_code == 200
+        assert response.json()["message"] == "请假记录已取消"
+        assert db.get(models.StudentAbsence, second_absence.id) is None
+
+        response = client.delete(f"/api/absences/{second_absence.id}")
+        assert response.status_code == 404
+
+
 def test_absence_counts_as_student_history(db: Session) -> None:
     student = _student(db, "李四", "lisi")
     _absence(db, student, lesson=5)

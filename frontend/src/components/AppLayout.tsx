@@ -1,4 +1,5 @@
 import {
+  CalendarOutlined,
   DashboardOutlined,
   DownloadOutlined,
   HistoryOutlined,
@@ -6,7 +7,8 @@ import {
   QuestionCircleOutlined,
   ReadOutlined,
   TeamOutlined,
-  ThunderboltOutlined
+  ThunderboltOutlined,
+  UserDeleteOutlined
 } from "@ant-design/icons";
 import { Button, Layout, Menu, Typography } from "antd";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -16,7 +18,9 @@ const { Header, Sider, Content } = Layout;
 
 const menuItems = [
   { key: "/", icon: <DashboardOutlined />, label: "首页 Dashboard" },
+  { key: "/course-sessions", icon: <CalendarOutlined />, label: "课程日程" },
   { key: "/students", icon: <TeamOutlined />, label: "学生名单" },
+  { key: "/absences", icon: <UserDeleteOutlined />, label: "请假名单" },
   { key: "/reports", icon: <ReadOutlined />, label: "汇报记录" },
   { key: "/questions", icon: <QuestionCircleOutlined />, label: "提问记录" },
   { key: "/draw", icon: <ThunderboltOutlined />, label: "随机抽取" },

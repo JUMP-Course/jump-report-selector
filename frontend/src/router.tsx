@@ -1,6 +1,8 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import AppLayout from "./components/AppLayout";
 import { getToken } from "./api/client";
+import AbsencesPage from "./pages/AbsencesPage";
+import CourseSessionsPage from "./pages/CourseSessionsPage";
 import DashboardPage from "./pages/DashboardPage";
 import DrawHistoryPage from "./pages/DrawHistoryPage";
 import DrawPage from "./pages/DrawPage";
@@ -24,7 +26,9 @@ export const router = createBrowserRouter([
     element: <ProtectedLayout />,
     children: [
       { index: true, element: <DashboardPage /> },
+      { path: "course-sessions", element: <CourseSessionsPage /> },
       { path: "students", element: <StudentsPage /> },
+      { path: "absences", element: <AbsencesPage /> },
       { path: "reports", element: <ReportsPage /> },
       { path: "questions", element: <QuestionsPage /> },
       { path: "draw", element: <DrawPage /> },
