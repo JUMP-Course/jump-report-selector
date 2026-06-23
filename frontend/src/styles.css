@@ -77,3 +77,131 @@ body {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
 }
+
+.student-chart-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+  gap: 12px;
+  align-items: stretch;
+  margin-bottom: 16px;
+}
+
+.student-chart-panel {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.student-chart-panel > .ant-typography {
+  margin-top: 0;
+}
+
+.student-chart-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.student-chart-panel-header .ant-typography {
+  margin: 0;
+}
+
+.ratio-list,
+.absence-ranking {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ratio-row {
+  min-width: 0;
+}
+
+.ratio-row-header,
+.ratio-labels {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ratio-row-header {
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.ratio-labels {
+  margin-top: 6px;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.ratio-track,
+.absence-rank-track {
+  height: 10px;
+  overflow: hidden;
+  background: #eef2f7;
+  border-radius: 8px;
+}
+
+.ratio-fill {
+  height: 100%;
+  background: var(--ratio-color);
+  border-radius: 8px;
+}
+
+.absence-rank-row {
+  min-width: 0;
+}
+
+.absence-rank-main {
+  display: grid;
+  grid-template-columns: 28px minmax(72px, 1fr) minmax(56px, auto) auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.absence-rank-index {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  color: #1d4ed8;
+  background: #dbeafe;
+  border-radius: 8px;
+  font-weight: 700;
+}
+
+.absence-rank-name {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.absence-rank-count {
+  font-weight: 700;
+}
+
+.absence-rank-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #f97316, #0ea5e9);
+  border-radius: 8px;
+}
+
+@media (max-width: 900px) {
+  .student-chart-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .absence-rank-main {
+    grid-template-columns: 28px minmax(72px, 1fr) auto;
+  }
+
+  .absence-rank-main .muted {
+    display: none;
+  }
+}

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import sys
 from datetime import date
 from pathlib import Path
@@ -20,7 +22,7 @@ from app.database import Base
 from app.database import get_db
 from app.draw_logic import compute_student_stats, save_draw_results, weighted_draw
 from app.history_cleanup import clear_questions, clear_reports, delete_draw_history_row, delete_report_row
-from app.routers import absences
+from app.routers import absences, exports
 
 
 @pytest.fixture
@@ -203,6 +205,44 @@ def test_absence_counts_as_student_history(db: Session) -> None:
     db.commit()
 
     assert student_has_history(db, student.id) is True
+
+
+def test_compute_student_stats_includes_absence_counts(db: Session) -> None:
+    first = _student(db, "甲同学", "ajia")
+    second = _student(db, "乙同学", "byi")
+    _absence(db, first, lesson=1)
+    _absence(db, first, lesson=3)
+    db.commit()
+
+    stats_by_id = {item["id"]: item for item in compute_student_stats(db)}
+
+    assert stats_by_id[first.id]["absence_count"] == 2
+    assert stats_by_id[second.id]["absence_count"] == 0
+
+
+def test_student_stats_export_includes_absence_count(db: Session) -> None:
+    first = _student(db, "甲同学", "ajia")
+    second = _student(db, "乙同学", "byi")
+    _absence(db, first, lesson=1)
+    _absence(db, first, lesson=3)
+    db.commit()
+
+    app = FastAPI()
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[require_auth] = lambda: "test"
+    app.include_router(exports.router)
+
+    with TestClient(app) as client:
+        response = client.get("/api/exports/student_stats.csv")
+        assert response.status_code == 200
+
+    rows = list(csv.reader(io.StringIO(response.content.decode("utf-8-sig"))))
+    header = rows[0]
+    absence_index = header.index("请假次数")
+    rows_by_name = {row[1]: row for row in rows[1:]}
+
+    assert rows_by_name[first.name][absence_index] == "2"
+    assert rows_by_name[second.name][absence_index] == "0"
 
 
 def test_delete_draw_history_removes_only_linked_auto_records(db: Session) -> None:

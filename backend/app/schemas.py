@@ -77,6 +77,7 @@ class StudentRead(StudentBase):
 class StudentStats(StudentRead):
     report_count: int
     question_count: int
+    absence_count: int
     last_report: bool
     recently_drawn: bool
     eligible_for_next_draw: bool

@@ -72,6 +72,7 @@ def compute_student_stats(db: Session, target_lesson: Optional[int] = None) -> l
 
     report_count_by_student: dict[int, int] = defaultdict(int)
     question_count_by_student: dict[int, int] = defaultdict(int)
+    absence_count_by_student: dict[int, int] = defaultdict(int)
     latest_valid_report_lesson = 0
     report_lessons_by_student: dict[int, set[int]] = defaultdict(set)
 
@@ -82,6 +83,14 @@ def compute_student_stats(db: Session, target_lesson: Optional[int] = None) -> l
 
     for question in valid_questions:
         question_count_by_student[question.questioner_id] += 1
+
+    absence_counts = db.execute(
+        select(models.StudentAbsence.student_id, func.count(models.StudentAbsence.id)).group_by(
+            models.StudentAbsence.student_id
+        )
+    ).all()
+    for student_id, absence_count in absence_counts:
+        absence_count_by_student[student_id] = int(absence_count)
 
     cooldown_reference_lesson = target_lesson - 1 if target_lesson is not None else latest_valid_report_lesson
     stats: list[dict[str, Any]] = []
@@ -108,6 +117,7 @@ def compute_student_stats(db: Session, target_lesson: Optional[int] = None) -> l
                 "updated_at": student.updated_at,
                 "report_count": report_count,
                 "question_count": question_count,
+                "absence_count": absence_count_by_student[student.id],
                 "last_report": last_report,
                 "recently_drawn": recently_drawn,
                 "eligible_for_next_draw": eligible_for_next_draw,

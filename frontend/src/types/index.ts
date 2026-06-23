@@ -24,6 +24,7 @@ export interface Student {
 export interface StudentStats extends Student {
   report_count: number;
   question_count: number;
+  absence_count: number;
   last_report: boolean;
   recently_drawn: boolean;
   eligible_for_next_draw: boolean;
